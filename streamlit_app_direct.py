@@ -77,8 +77,15 @@ with st.sidebar:
         help="Automatically find and add new datasets based on your question"
     )
 
+# Initialize session state
+if 'selected_example' not in st.session_state:
+    st.session_state.selected_example = None
+if 'run_query' not in st.session_state:
+    st.session_state.run_query = False
+
 # Example questions
 st.markdown("### 💡 Example Questions")
+st.markdown("*Click to run directly, or type your own question below*")
 examples = [
     "What was the average annual rainfall in Odisha in 1951?",
     "Compare rainfall patterns between Odisha and Punjab in the 1950s",
@@ -91,29 +98,41 @@ cols = st.columns(2)
 for i, example in enumerate(examples):
     with cols[i % 2]:
         if st.button(example, key=f"example_{i}", use_container_width=True):
-            st.session_state.question_input = example
-            st.rerun()
+            st.session_state.selected_example = example
+            st.session_state.run_query = True
 
 # Main question input
 question = st.text_area(
     "Ask a question about Indian agriculture and climate:",
-    value=st.session_state.get('question_input', ''),
+    value=st.session_state.selected_example if st.session_state.selected_example else "",
     key="question_text_area",
     height=100,
     placeholder="E.g., Compare rainfall and crop production trends in Maharashtra and Punjab..."
 )
 
-# Submit button
-if st.button("🔍 Get Answer", type="primary", use_container_width=True):
-    if not question:
+# Submit button OR auto-run from example
+submit_clicked = st.button("🔍 Get Answer", type="primary", use_container_width=True)
+
+# Check if we should run the query
+should_run = submit_clicked or st.session_state.run_query
+
+if should_run:
+    # Use the question from text area, or from selected example
+    query_text = question if question else st.session_state.selected_example
+
+    if not query_text:
         st.warning("Please enter a question.")
     else:
+        # Reset the run_query flag
+        st.session_state.run_query = False
+        st.session_state.selected_example = query_text  # Keep the question visible
+
         # Show progress
         with st.spinner("🔍 Discovering datasets and analyzing..."):
             try:
                 # Get answer
                 result = app.answer_question(
-                    question=question,
+                    question=query_text,
                     auto_discover=auto_discover,
                     max_datasets=max_datasets,
                     max_rows_per_dataset=max_rows

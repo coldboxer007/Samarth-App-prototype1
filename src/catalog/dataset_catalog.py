@@ -11,6 +11,9 @@ from src.config import DB_PATH
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import seed datasets (lazy import to avoid circular dependency)
+_SEED_DATASETS_LOADED = False
+
 
 @dataclass
 class DatasetMetadata:
@@ -28,9 +31,13 @@ class DatasetMetadata:
 class DatasetCatalog:
     """Manages the catalog of available datasets."""
 
-    def __init__(self, db_path: str = DB_PATH):
+    def __init__(self, db_path: str = DB_PATH, auto_seed: bool = True):
         self.db_path = db_path
         self._initialize_catalog_table()
+
+        # Auto-seed with pre-defined datasets if catalog is empty
+        if auto_seed:
+            self._seed_if_empty()
 
     def _initialize_catalog_table(self):
         """Create the catalog table if it doesn't exist."""
@@ -111,3 +118,42 @@ class DatasetCatalog:
         """Get the resource ID for a dataset."""
         dataset = self.get_dataset(dataset_id)
         return dataset["resource_id"] if dataset else None
+
+    def _seed_if_empty(self):
+        """Seed the catalog with pre-defined datasets if it's empty."""
+        global _SEED_DATASETS_LOADED
+
+        # Check if catalog already has datasets
+        with duckdb.connect(self.db_path) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM dataset_catalog").fetchone()[0]
+
+        # Only seed if catalog is empty and we haven't loaded seeds yet
+        if count == 0 and not _SEED_DATASETS_LOADED:
+            logger.info("Catalog is empty. Seeding with pre-defined datasets...")
+
+            try:
+                from src.catalog.seed_datasets import get_seed_datasets
+
+                seed_datasets = get_seed_datasets()
+
+                for seed in seed_datasets:
+                    metadata = DatasetMetadata(
+                        dataset_id=seed.dataset_id,
+                        resource_id=seed.resource_id,
+                        name=seed.name,
+                        publisher=seed.publisher,
+                        format=seed.format,
+                        category=seed.category,
+                        sample_columns=seed.sample_columns,
+                        last_updated=None
+                    )
+                    self.add_dataset(metadata)
+
+                logger.info(f"Successfully seeded {len(seed_datasets)} datasets to catalog")
+                _SEED_DATASETS_LOADED = True
+
+            except Exception as e:
+                logger.error(f"Error seeding datasets: {e}")
+        elif count > 0:
+            logger.info(f"Catalog already has {count} datasets, skipping seed")
+            _SEED_DATASETS_LOADED = True
